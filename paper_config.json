@@ -1,0 +1,64 @@
+{
+  "seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "cnn": {
+    "prefix": "paper_cnn_",
+    "methods": ["normal", "ewc", "lwf", "replay"],
+    "train": {
+      "dataset": "imagenet1k",
+      "model": "resnet18_gn",
+      "num_classes": 100,
+      "img_size": 224,
+      "increment": 5,
+      "epochs": 60,
+      "batch_size": 256,
+      "lr": 0.2,
+      "patience": 10,
+      "scheduler": "cosine",
+      "channels_last": true,
+      "memory_per_class": 300,
+      "ewc_lambda": 5e5,
+      "ewc_protect": "all",
+      "lwf_lambda": 30.0,
+      "lwf_temperature": 2.0
+    },
+    "analyze_layers": "layer1,layer2,layer3,layer4",
+    "aggregate_layers": "layer1,layer2,layer3,layer4"
+  },
+  "cnn_anchor": {
+    "prefix": "paper_anchor_",
+    "memory_per_class": 300,
+    "anchor_loss": "mse",
+    "anchor_layers": "layer3,layer4",
+    "lambdas": [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0],
+    "train": {
+      "dataset": "imagenet1k",
+      "model": "resnet18_gn",
+      "num_classes": 100,
+      "img_size": 224,
+      "increment": 5,
+      "epochs": 60,
+      "batch_size": 256,
+      "lr": 0.2,
+      "patience": 10,
+      "scheduler": "cosine",
+      "channels_last": true
+    },
+    "analyze_layers": "layer3,layer4"
+  },
+  "rnn": {
+    "prefix": "paper_rnn_",
+    "methods": ["normal", "replay"],
+    "probe": "fdgo",
+    "train": {
+      "hidden_size": 256,
+      "sigma_rec": 0.05,
+      "activation": "softplus",
+      "w_rec_init": "diag",
+      "num_iterations": 5000,
+      "batch_size": 1024,
+      "lr": 0.001,
+      "train_pool_size": 30,
+      "memory_per_task": 300
+    }
+  }
+}

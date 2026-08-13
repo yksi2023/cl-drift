@@ -1,0 +1,8 @@
+torch==2.9.0
+torchvision==0.24.0
+tqdm
+matplotlib
+numpy
+scikit-learn
+scipy
+umap-learn

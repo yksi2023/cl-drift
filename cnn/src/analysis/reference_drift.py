@@ -1,0 +1,148 @@
+"""Reference-anchored drift analysis.
+
+Compares representations from each checkpoint against a reference checkpoint
+(the first checkpoint by default) for every layer, reporting cosine similarity,
+L2 distance, and a shuffled-reference control.
+"""
+import json
+import os
+from typing import Dict, List
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+from src.analysis.drift_metrics import compute_metrics
+from src.analysis._plot_utils import (
+    SMALL_LEGEND_FONT_SIZE,
+    SMALL_LEGEND_TITLE_SIZE,
+    apply_paper_axis_style,
+    layer_color_map,
+    layer_errorbar_kwargs,
+    layer_marker_map,
+    sparse_value_ticks,
+)
+
+
+def plot_drift_results(results: List[Dict], output_dir: str):
+    """Plot drift metrics and save to file."""
+    tasks = [r["target_task"] for r in results]
+    layers = sorted(list(set(r["layer"] for r in results)))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    colors = layer_color_map(layers)
+    markers = layer_marker_map(layers)
+
+    xticks, xticklabels = sparse_value_ticks(tasks)
+
+    for layer in layers:
+        layer_data = [r for r in results if r["layer"] == layer]
+        layer_data.sort(key=lambda x: x["target_task"])
+
+        xs = [d["target_task"] for d in layer_data]
+
+        cos_means = [d["cosine_sim_mean"] for d in layer_data]
+        cos_stds = [d["cosine_sim_std"] for d in layer_data]
+        line = ax1.errorbar(
+            xs, cos_means, yerr=cos_stds, label=f"{layer}",
+            **layer_errorbar_kwargs(colors[layer], markers[layer]),
+        )
+
+        shuffled_means = [d["shuffled_sim_mean"] for d in layer_data]
+        ax1.plot(xs, shuffled_means, linestyle="--", color=line[0].get_color(), alpha=0.5,
+                 label=f"{layer} (Random)")
+
+        l2_means = [d["l2_dist_mean"] for d in layer_data]
+        l2_stds = [d["l2_dist_std"] for d in layer_data]
+        ax2.errorbar(
+            xs, l2_means, yerr=l2_stds, label=layer,
+            **layer_errorbar_kwargs(colors[layer], markers[layer]),
+        )
+
+    ax1.set_xlabel("Task Index")
+    ax1.set_ylabel("Cosine Similarity")
+    ax1.set_xticks(xticks)
+    ax1.set_xticklabels(xticklabels)
+    apply_paper_axis_style(
+        ax1,
+        legend=True,
+        legend_kwargs={
+            "fontsize": SMALL_LEGEND_FONT_SIZE,
+            "title_fontsize": SMALL_LEGEND_TITLE_SIZE,
+        },
+    )
+    ax1.grid(True, linestyle="--", alpha=0.3)
+
+    ax2.set_xlabel("Task Index")
+    ax2.set_ylabel("L2 Distance")
+    ax2.set_xticks(xticks)
+    ax2.set_xticklabels(xticklabels)
+    apply_paper_axis_style(
+        ax2,
+        legend=True,
+        legend_kwargs={
+            "fontsize": SMALL_LEGEND_FONT_SIZE,
+            "title_fontsize": SMALL_LEGEND_TITLE_SIZE,
+        },
+    )
+    ax2.grid(True, linestyle="--", alpha=0.3)
+
+    plt.tight_layout()
+    output_path = os.path.join(output_dir, "drift_plot.pdf")
+    plt.savefig(output_path)
+    print(f"Drift plot saved to {output_path}")
+    plt.close()
+
+
+def run_reference_drift(
+    reps_cache: Dict[int, Dict[str, torch.Tensor]],
+    layer_names: List[str],
+    output_dir: str,
+) -> None:
+    """Run reference-anchored drift analysis from pre-extracted representation cache.
+
+    Args:
+        reps_cache: {task_idx: {layer: Tensor(N, D)}} from build_reps_cache.
+        layer_names: Layers to include.
+        output_dir: Directory to save results.
+    """
+    metrics_path = os.path.join(output_dir, "metrics.json")
+
+    sorted_task_indices = sorted(reps_cache.keys())
+    reference_idx = sorted_task_indices[0]
+    print(f"Using Task {reference_idx} as reference.")
+
+    results = []
+    for layer in layer_names:
+        feat_base = reps_cache[reference_idx][layer]
+        metrics = compute_metrics(feat_base, feat_base)
+        results.append({
+            "reference_task": reference_idx,
+            "baseline_task": reference_idx,
+            "target_task": reference_idx,
+            "layer": layer,
+            **metrics,
+        })
+
+    for task_idx in sorted_task_indices:
+        if task_idx == reference_idx:
+            continue
+        print(f"Comparing Task {task_idx} against reference...")
+        for layer in layer_names:
+            feat_base = reps_cache[reference_idx][layer]
+            feat_curr = reps_cache[task_idx][layer]
+            metrics = compute_metrics(feat_base, feat_curr)
+            results.append({
+                "reference_task": reference_idx,
+                "baseline_task": reference_idx,
+                "target_task": task_idx,
+                "layer": layer,
+                **metrics,
+            })
+
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    print(f"Metrics saved to {metrics_path}")
+
+    plot_drift_results(results, output_dir)
+

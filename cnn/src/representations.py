@@ -1,0 +1,80 @@
+from typing import Dict, List, Tuple, Callable, Optional
+
+import torch
+
+
+def register_activation_hooks(
+    model: torch.nn.Module,
+    layer_names: List[str],
+    detach: bool = True,  # False = keep graph for the anchoring penalty
+) -> Tuple[Dict[str, torch.Tensor], List[torch.utils.hooks.RemovableHandle]]:
+    """Register forward hooks to capture activations for the given layer names.
+
+    Returns a dict to store activations and the list of hook handles.
+
+    Args:
+        detach: If True (default) the captured activations are detached from
+            the autograd graph -- correct for read-only drift analysis. Set to
+            False when the activations must remain differentiable (e.g. the
+            representation-anchoring penalty in AnchoredReplayMethod), so that
+            gradients flow back into the model weights through the probe pass.
+    """
+    activations: Dict[str, torch.Tensor] = {}
+    handles: List[torch.utils.hooks.RemovableHandle] = []
+
+    name_to_module: Dict[str, torch.nn.Module] = dict(model.named_modules())
+    for name in layer_names:
+        if name not in name_to_module:
+            raise ValueError(f"Layer name '{name}' not found in model modules.")
+
+        def _make_hook(key: str) -> Callable:
+            def _hook(_module, _inp, out):
+                if isinstance(out, tuple):
+                    out = out[0]
+                # Keep on device + contiguous; DO NOT .cpu() here.
+                # Inline CPU transfers force a full GPU sync inside the
+                # forward pass, preventing overlap with compute. The
+                # consumer moves tensors to CPU once per batch instead.
+                activations[key] = (out.detach() if detach else out).flatten(1)
+            return _hook
+
+        handle = name_to_module[name].register_forward_hook(_make_hook(name))
+        handles.append(handle)
+
+    return activations, handles
+
+
+@torch.no_grad()
+def extract_representations(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    layer_names: List[str],
+    device: Optional[torch.device] = None,
+    max_batches: Optional[int] = None,
+) -> Dict[str, torch.Tensor]:
+    """Run data through the model and collect activations from specified layers.
+
+    Returns a dict mapping layer name to tensor of shape [N, D].
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    model.eval()
+    collected: Dict[str, List[torch.Tensor]] = {ln: [] for ln in layer_names}
+    activations, handles = register_activation_hooks(model, layer_names)
+
+    try:
+        for batch_idx, (inputs, _labels) in enumerate(dataloader):
+            inputs = inputs.to(device, non_blocking=True)
+            _ = model(inputs)
+            for ln in layer_names:
+                if ln in activations:
+                    # Move to CPU per-batch so only one sync per batch
+                    # (instead of one per hooked layer inside forward).
+                    collected[ln].append(activations[ln].to("cpu", non_blocking=True).float())
+            if max_batches is not None and (batch_idx + 1) >= max_batches:
+                break
+    finally:
+        for h in handles:
+            h.remove()
+
+    return {ln: torch.cat(tensors, dim=0) if tensors else torch.empty(0) for ln, tensors in collected.items()}

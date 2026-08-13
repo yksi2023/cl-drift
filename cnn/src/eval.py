@@ -1,0 +1,234 @@
+import torch
+from typing import Dict, List, Tuple
+import json
+import matplotlib.pyplot as plt
+import os
+from src.analysis._plot_utils import apply_paper_axis_style, sparse_value_ticks, TITLE_SIZE
+
+def evaluate(model, test_loader, criterion, device, active_classes_range=None):
+    """
+    Evaluate model on test data.
+    
+    Args:
+        active_classes_range: Optional tuple (start_cls, end_cls) for task-incremental evaluation.
+                              If None, uses class-incremental evaluation (full output).
+    """
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    with torch.inference_mode():
+        for inputs, labels in test_loader:
+            inputs = inputs.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+            outputs = model(inputs)
+            
+            if active_classes_range is not None:
+                # Task-incremental: only consider current task's classes
+                start_cls, end_cls = active_classes_range
+                masked_outputs = outputs[:, start_cls:end_cls]
+                adjusted_labels = labels - start_cls
+                loss = criterion(masked_outputs, adjusted_labels)
+                _, predicted = masked_outputs.max(1)
+                correct += predicted.eq(adjusted_labels).sum().item()
+            else:
+                # Class-incremental: consider all classes
+                loss = criterion(outputs, labels)
+                _, predicted = outputs.max(1)
+                correct += predicted.eq(labels).sum().item()
+            
+            total_loss += loss.item()
+            total += labels.size(0)
+    avg_loss = total_loss / len(test_loader)
+    accuracy = 100.0 * correct / total
+    return avg_loss, accuracy
+
+def plot_performance(online_results: List[float], retrospective_results: List[float], first_task_results: List[float], save_dir: str = None):
+    '''Plot figures for within-task performance, retrospective performance, and first task forgetting.'''
+    num_plots = 3 
+    fig, axes = plt.subplots(1, num_plots, figsize=(8 * num_plots, 6))
+    
+    ax1, ax2, ax3 = axes
+    
+    max_tasks = max(len(online_results), len(retrospective_results), len(first_task_results))
+    xticks, xticklabels = sparse_value_ticks(range(1, max_tasks + 1))
+    
+    ax1.plot(range(1,len(online_results)+1), online_results, marker='o')
+    ax2.plot(range(1,len(retrospective_results)+1), retrospective_results, marker='o')
+    ax1.set_title("Performance on the Current Task During Continual Learning")
+    ax1.set_xlabel("Task Index")
+    ax1.set_ylabel("Accuracy")
+    ax1.set_ylim(0, 100)
+    ax1.set_xticks(xticks)
+    ax1.set_xticklabels(xticklabels)
+    ax1.title.set_size(TITLE_SIZE)
+    apply_paper_axis_style(ax1)
+    ax1.grid(True, linestyle='--', alpha=0.6)
+    
+    ax2.set_title("Performance on Previous Tasks After Completing All Training")
+    ax2.set_xlabel("Task Index")
+    ax2.set_ylabel("Accuracy")
+    ax2.set_ylim(0, 100)
+    ax2.set_xticks(xticks)
+    ax2.set_xticklabels(xticklabels)
+    ax2.title.set_size(TITLE_SIZE)
+    apply_paper_axis_style(ax2)
+    ax2.grid(True, linestyle='--', alpha=0.6)
+    
+    ax3.plot(range(1, len(first_task_results)+1), first_task_results, marker='o', color='red')
+    ax3.set_title("Performance on First Task After Each Task Training")
+    ax3.set_xlabel("Task Index")
+    ax3.set_ylabel("Accuracy")
+    ax3.set_ylim(0, 100)
+    ax3.set_xticks(xticks)
+    ax3.set_xticklabels(xticklabels)
+    ax3.title.set_size(TITLE_SIZE)
+    apply_paper_axis_style(ax3)
+    ax3.grid(True, linestyle='--', alpha=0.6)
+    
+    plt.tight_layout()
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, "performance.png"))
+    
+
+def comprehensive_evaluation(
+    model: torch.nn.Module,
+    online_results: List[float],
+    first_task_results: List[float] ,
+    data_manager,
+    device: torch.device,
+    num_classes: int,
+    increment: int,
+    criterion: torch.nn.Module,
+    save_dir: str = None,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Evaluate the fully trained model on all previous tasks (TIL).
+    
+    Args:
+        model: The fully trained model
+        data_manager: Dataset manager
+        device: Device to run evaluation on
+        num_classes: Total number of classes
+        increment: Number of classes per task
+        criterion: Loss function
+        save_dir: Optional directory to save evaluation results
+        
+    Returns:
+        Dictionary with task-wise evaluation results
+    """
+    model.eval()
+    results = {}
+    
+    print("=" * 50)
+    print("COMPREHENSIVE EVALUATION")
+    print("=" * 50)
+    
+    # Evaluate on each task
+    for task_idx in range(0, num_classes, increment):
+        task_num = task_idx // increment + 1
+        task_classes = list(range(task_idx, min(task_idx + increment, num_classes)))
+        
+        print(f"\nEvaluating Task {task_num} (Classes: {task_classes})")
+        
+        # Get test data for this task
+        test_loader = data_manager.get_loader(
+            mode='test', 
+            label=task_classes, 
+            batch_size=64, 
+            shuffle=False
+        )
+        
+        task_range = (task_idx, task_idx + increment)
+        task_loss, task_accuracy = evaluate(
+            model,
+            test_loader,
+            criterion,
+            device,
+            active_classes_range=task_range,
+        )
+        
+        results[f"task_{task_num}"] = {
+            "classes": f'{task_classes[0]}-{task_classes[-1]}',
+            "loss": task_loss,
+            "accuracy": task_accuracy,
+            "num_samples": len(test_loader.dataset)
+        }
+    
+    # Calculate overall statistics
+    all_accuracies = [result["accuracy"] for result in results.values()]
+    all_losses = [result["loss"] for result in results.values()]
+    
+    overall_stats = {
+        "mean_accuracy": sum(all_accuracies) / len(all_accuracies),
+        "std_accuracy": torch.tensor(all_accuracies).std().item(),
+        "mean_loss": sum(all_losses) / len(all_losses),
+        "std_loss": torch.tensor(all_losses).std().item(),
+        "num_tasks": len(results)
+    }
+    
+    results["overall"] = overall_stats
+    
+    print("\n" + "=" * 50)
+    print("OVERALL STATISTICS")
+    print("=" * 50)
+    print(f"Mean Accuracy: {overall_stats['mean_accuracy']:.2f}% ± {overall_stats['std_accuracy']:.2f}%")
+    print(f"Mean Loss: {overall_stats['mean_loss']:.4f} ± {overall_stats['std_loss']:.4f}")
+    print(f"Number of Tasks: {overall_stats['num_tasks']}")
+    
+    # Save results if save_dir is provided
+    if save_dir:
+        import os
+        os.makedirs(save_dir, exist_ok=True)
+        results_path = os.path.join(save_dir, "comprehensive_evaluation.json")
+        with open(results_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        print(f"\nResults saved to: {results_path}")
+    return results
+
+
+def plot_performance_from_files(ckpt_dir: str, output_dir: str = None):
+    """
+    Plot performance figures from saved JSON files.
+    
+    Reads training_metrics.json and comprehensive_evaluation.json from ckpt_dir,
+    then generates performance plots.
+    
+    Args:
+        ckpt_dir: Directory containing training_metrics.json and comprehensive_evaluation.json
+        output_dir: Directory to save plots (defaults to ckpt_dir)
+    """
+    if output_dir is None:
+        output_dir = ckpt_dir
+    
+    # Load training metrics
+    training_metrics_path = os.path.join(ckpt_dir, "training_metrics.json")
+    if not os.path.exists(training_metrics_path):
+        raise FileNotFoundError(f"Training metrics not found: {training_metrics_path}")
+    
+    with open(training_metrics_path, "r", encoding="utf-8") as f:
+        training_metrics = json.load(f)
+    
+    online_results = training_metrics["online_results"]
+    first_task_results = training_metrics["first_task_results"]
+    
+    # Load comprehensive evaluation results
+    eval_path = os.path.join(ckpt_dir, "comprehensive_evaluation.json")
+    if not os.path.exists(eval_path):
+        raise FileNotFoundError(f"Comprehensive evaluation not found: {eval_path}")
+    
+    with open(eval_path, "r", encoding="utf-8") as f:
+        eval_results = json.load(f)
+    
+    # Extract retrospective accuracies (exclude 'overall' key)
+    retrospective_results = [
+        eval_results[k]["accuracy"] 
+        for k in sorted(eval_results.keys(), key=lambda x: int(x.split("_")[1]) if x.startswith("task_") else 999)
+        if k.startswith("task_")
+    ]
+    
+    # Plot
+    plot_performance(online_results, retrospective_results, first_task_results, output_dir)
+    print(f"Performance plots saved to {output_dir}")

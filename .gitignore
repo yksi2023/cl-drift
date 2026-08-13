@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# Experiment outputs / checkpoints / data (large; regenerate locally)
+cnn/experiments/
+rnn/experiments/
+cnn/data/
+rnn/data/
+*.pth
+*.pt
+*.ckpt
+*.npz
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*~
+
+# Cluster logs
+logs/
+*.out
