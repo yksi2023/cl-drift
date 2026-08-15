@@ -120,6 +120,14 @@ def layer_errorbar_kwargs(color: str, marker: str) -> Dict[str, object]:
     }
 
 
+def layer_display_name(layer: str) -> str:
+    """Convert an internal layer name to a paper-friendly display label."""
+    short = layer.rsplit(".", 1)[-1]
+    if short.startswith("layer"):
+        return f"Stage {short[len('layer'):]}"
+    return short
+
+
 def sparse_ticks(n: int) -> Tuple[List[int], List[str]]:
     """Return (positions, labels) showing only start, middle, and end ticks.
 

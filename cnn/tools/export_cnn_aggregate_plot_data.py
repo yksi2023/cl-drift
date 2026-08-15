@@ -89,7 +89,7 @@ def main():
                 np.nanmean(np.stack(matrices), axis=0), delimiter=",", fmt="%.8g",
             )
 
-        for layer in layers:
+        for layer in [aggregate.FIGURE2_SIMILARITY_LAYER]:
             matrices = [aggregate.load_similarity_matrix(path, layer) for path in seed_dirs]
             matrices = [matrix for matrix in matrices if matrix is not None]
             if matrices:

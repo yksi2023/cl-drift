@@ -380,8 +380,12 @@ def make_accuracy_matrix_report(run_dirs: List[str], out_dir: str) -> None:
     )
 
 
+FIG4A_LAMBDA_MIN = 0.3
+FIG4A_LAMBDA_MAX = 1000.0
+
+
 def make_focus_plots(agg: List[dict], out_dir: str) -> None:
-    """Create compact anchoring figures with replay as a visual reference."""
+    """Fig. 4 panels: 4a uses λ in [0.3, 1000]; 4b uses the full lambda grid."""
     rows = sorted(agg, key=lambda entry: entry["anchor_lambda"])
     if not rows:
         return
@@ -389,51 +393,57 @@ def make_focus_plots(agg: List[dict], out_dir: str) -> None:
 
     baseline = next((entry for entry in rows if entry["anchor_lambda"] == 0.0), None)
     anchored = [entry for entry in rows if entry["anchor_lambda"] > 0.0]
-    lambda_rows = [entry for entry in anchored if 0.3 <= entry["anchor_lambda"] <= 1000]
+    lambda_rows_4a = [
+        entry for entry in anchored
+        if FIG4A_LAMBDA_MIN <= entry["anchor_lambda"] <= FIG4A_LAMBDA_MAX
+    ]
     if not anchored:
         print("No positive anchor lambdas found; skipping focused anchoring figures.")
         return
 
-    lambdas = [entry["anchor_lambda"] for entry in lambda_rows]
     task1_color = "#1f77b4"
     forward_color = "#d62728"
     baseline_color = "0.45"
 
-    fig, ax = plt.subplots(figsize=(6.6, 4.25))
-    series = (
-        ("first_task_acc", "Task-1 accuracy", task1_color),
-        ("plasticity_best_val_acc", "Forward accuracy", forward_color),
-    )
-    for key, label, color in series:
-        if baseline is not None and math.isfinite(baseline[f"{key}_mean"]):
-            mean = baseline[f"{key}_mean"]
-            ci = baseline[f"{key}_ci"]
-            ax.axhspan(mean - ci, mean + ci, color=color, alpha=0.10, zorder=0)
-            ax.axhline(
-                mean, color=color, linestyle="--", linewidth=1.35, alpha=0.8,
-                label=f"Replay {label.lower()} ($\\lambda=0$)",
-            )
-        ys = [entry[f"{key}_mean"] for entry in lambda_rows]
-        errors = [entry[f"{key}_ci"] for entry in lambda_rows]
-        ax.errorbar(
-            lambdas, ys, yerr=errors, label=f"Anchored {label.lower()}",
-            color=color, marker="o", markersize=5.8, linestyle="none",
-            capsize=3, elinewidth=1.1, zorder=3,
+    if lambda_rows_4a:
+        lambdas = [entry["anchor_lambda"] for entry in lambda_rows_4a]
+        fig, ax = plt.subplots(figsize=(6.6, 4.25))
+        series = (
+            ("first_task_acc", "Task-1 accuracy", task1_color),
+            ("plasticity_best_val_acc", "Forward accuracy", forward_color),
         )
-    ax.set_xscale("log")
-    ax.set_xlabel(r"Anchor strength $\lambda$ (log scale)", fontsize=14)
-    ax.set_ylabel("Accuracy (%)", fontsize=14)
-    ax.tick_params(axis="both", labelsize=12)
-    ax.grid(True, which="both", linestyle=":", alpha=0.5)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.legend(frameon=False, fontsize=12, loc="lower left")
-    ax.margins(y=0.05)
-    fig.tight_layout()
-    path = os.path.join(out_dir, "task1_fwd_acc_vs_lambda.pdf")
-    fig.savefig(path, bbox_inches="tight", pad_inches=0.03)
-    plt.close(fig)
-    print(f"Plot saved to {path}")
+        for key, label, color in series:
+            if baseline is not None and math.isfinite(baseline[f"{key}_mean"]):
+                mean = baseline[f"{key}_mean"]
+                ci = baseline[f"{key}_ci"]
+                ax.axhspan(mean - ci, mean + ci, color=color, alpha=0.10, zorder=0)
+                ax.axhline(
+                    mean, color=color, linestyle="--", linewidth=1.35, alpha=0.8,
+                    label=f"Replay {label.lower()} ($\\lambda=0$)",
+                )
+            ys = [entry[f"{key}_mean"] for entry in lambda_rows_4a]
+            errors = [entry[f"{key}_ci"] for entry in lambda_rows_4a]
+            ax.errorbar(
+                lambdas, ys, yerr=errors, label=f"Anchored {label.lower()}",
+                color=color, marker="o", markersize=5.8, linestyle="none",
+                capsize=3, elinewidth=1.1, zorder=3,
+            )
+        ax.set_xscale("log")
+        ax.set_xlabel(r"Anchor strength $\lambda$ (log scale)", fontsize=14)
+        ax.set_ylabel("Accuracy (%)", fontsize=14)
+        ax.tick_params(axis="both", labelsize=12)
+        ax.grid(True, which="both", linestyle=":", alpha=0.5)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.legend(frameon=False, fontsize=12, loc="lower left")
+        ax.margins(y=0.05)
+        fig.tight_layout()
+        path = os.path.join(out_dir, "task1_fwd_acc_vs_lambda.pdf")
+        fig.savefig(path, bbox_inches="tight", pad_inches=0.03)
+        plt.close(fig)
+        print(f"Plot saved to {path}")
+    else:
+        print("No lambdas in [0.3, 1000]; skipping Fig. 4a.")
 
     drift_rows = [entry for entry in anchored if math.isfinite(entry["final_drift_mean"])]
     if not drift_rows:

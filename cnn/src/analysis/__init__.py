@@ -24,6 +24,7 @@ from .cache import build_reps_cache
 from .reference_drift import run_reference_drift
 from .model_similarity import run_model_similarity
 from .gap_drift import run_gap_drift
+from .sample_similarity import run_sample_similarity
 from .performance import plot_cnn_performance
 from .sample_umap import run_sample_umap
 from .drift_metrics import (
@@ -36,6 +37,7 @@ __all__ = [
     "run_reference_drift",
     "run_model_similarity",
     "run_gap_drift",
+    "run_sample_similarity",
     "plot_cnn_performance",
     "run_sample_umap",
     "compute_metrics",

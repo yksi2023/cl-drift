@@ -10,6 +10,7 @@ cnn/experiments/
 rnn/experiments/
 cnn/data/
 rnn/data/
+figures/
 *.pth
 *.pt
 *.ckpt

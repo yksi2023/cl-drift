@@ -4,8 +4,9 @@ Paper pipeline (always runs):
   1. Reference drift vs first checkpoint
   2. Pairwise model similarity matrices
   3. Sample-PV gap drift
-  4. Sample UMAP (Fig. 3)
-  5. Performance / accuracy matrix
+  4. Sample similarity / CKA (Fig. S1)
+  5. Sample UMAP (Fig. 3)
+  6. Performance / accuracy matrix
 """
 import argparse
 import json
@@ -21,6 +22,7 @@ from src.analysis import (
     run_reference_drift,
     run_model_similarity,
     run_gap_drift,
+    run_sample_similarity,
     plot_cnn_performance,
     run_sample_umap,
 )
@@ -109,7 +111,7 @@ def main():
     print(f"Output dir: {args.output_dir}")
     print("=" * 60)
 
-    print("\n[0/5] Building representation cache...")
+    print("\n[0/6] Building representation cache...")
     reps_cache, labels, _neuron_indices = build_reps_cache(
         model=model,
         probe_loader=probe_loader,
@@ -123,28 +125,36 @@ def main():
     print(f"  Cache built: {len(reps_cache)} checkpoints × {len(layer_names)} layers, "
           f"N={labels.shape[0]} probe samples")
 
-    print("\n[1/5] Reference drift...")
+    print("\n[1/6] Reference drift...")
     run_reference_drift(
         reps_cache=reps_cache,
         layer_names=layer_names,
         output_dir=args.output_dir,
     )
 
-    print("\n[2/5] Model similarity...")
+    print("\n[2/6] Model similarity...")
     run_model_similarity(
         reps_cache=reps_cache,
         layer_names=layer_names,
         output_dir=args.output_dir,
     )
 
-    print("\n[3/5] Gap drift (sample-PV)...")
+    print("\n[3/6] Gap drift (sample-PV)...")
     run_gap_drift(
         reps_cache=reps_cache,
         layer_names=layer_names,
         output_dir=args.output_dir,
     )
 
-    print("\n[4/5] Sample UMAP...")
+    print("\n[4/6] Sample similarity / CKA...")
+    run_sample_similarity(
+        reps_cache=reps_cache,
+        labels=labels,
+        layer_names=layer_names,
+        output_dir=args.output_dir,
+    )
+
+    print("\n[5/6] Sample UMAP...")
     run_sample_umap(
         reps_cache=reps_cache,
         labels=labels,
@@ -155,7 +165,7 @@ def main():
         show_trajectory=False,
     )
 
-    print("\n[5/5] Performance plots...")
+    print("\n[6/6] Performance plots...")
     try:
         plot_performance_from_files(args.ckpt_dir, args.output_dir)
     except FileNotFoundError as e:
